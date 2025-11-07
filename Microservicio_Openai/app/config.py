@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     mongodb_url: str = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
     mongodb_database_name: str = os.getenv("MONGODB_DATABASE_NAME", "hackathon_salud")
     mongodb_collection_conversations: str = os.getenv("MONGODB_COLLECTION_CONVERSATIONS", "conversations")
+    mongodb_collection_knowledge: str = os.getenv("MONGODB_COLLECTION_KNOWLEDGE", "knowledge_base")
     
     # Guardrails Configuration (configurable por compañera)
     enable_medical_guardrails: bool = os.getenv("ENABLE_MEDICAL_GUARDRAILS", "true").lower() == "true"

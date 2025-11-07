@@ -5,6 +5,7 @@ from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 from typing import List, Dict, Optional, Any
 from datetime import datetime
+from uuid import uuid4
 import logging
 
 from .config import settings
@@ -19,6 +20,7 @@ class MongoDBService:
         self.client: Optional[MongoClient] = None
         self.db = None
         self.conversations_collection = None
+        self.knowledge_collection = None
         self._connected = False
     
     def connect(self):
@@ -32,6 +34,7 @@ class MongoDBService:
             self.client.admin.command('ping')
             self.db = self.client[settings.mongodb_database_name]
             self.conversations_collection = self.db[settings.mongodb_collection_conversations]
+            self.knowledge_collection = self.db[settings.mongodb_collection_knowledge]
             self._connected = True
             logger.info(f"✅ Conectado a MongoDB: {settings.mongodb_database_name}")
             return True
@@ -207,6 +210,72 @@ class MongoDBService:
         except Exception as e:
             logger.error(f"Error al contar mensajes en MongoDB: {str(e)}")
             return 0
+
+    def upsert_knowledge_document(
+        self,
+        doc_id: Optional[str],
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
+        """Inserta o actualiza un documento de la base de conocimiento"""
+        if not self.is_connected() or self.knowledge_collection is None:
+            logger.warning("Intento de guardar conocimiento sin conexión a MongoDB")
+            return None
+
+        if not content or not content.strip():
+            logger.warning("Contenido vacío al intentar guardar conocimiento, se omite")
+            return None
+
+        try:
+            document_id = doc_id or str(uuid4())
+            payload = {
+                "content": content,
+                "metadata": metadata or {},
+                "updated_at": datetime.utcnow()
+            }
+
+            self.knowledge_collection.update_one(
+                {"_id": document_id},
+                {"$set": payload},
+                upsert=True
+            )
+
+            return document_id
+        except Exception as e:
+            logger.error(f"Error al guardar documento de conocimiento en MongoDB: {str(e)}")
+            return None
+
+    def get_all_knowledge_documents(self) -> List[Dict[str, Any]]:
+        """Recupera todos los documentos de la base de conocimiento"""
+        if not self.is_connected() or self.knowledge_collection is None:
+            return []
+
+        try:
+            documents: List[Dict[str, Any]] = []
+            for doc in self.knowledge_collection.find().sort("updated_at", -1):
+                documents.append({
+                    "id": str(doc.get("_id")),
+                    "content": doc.get("content", ""),
+                    "metadata": doc.get("metadata", {}),
+                    "updated_at": doc.get("updated_at")
+                })
+            return documents
+        except Exception as e:
+            logger.error(f"Error al obtener documentos de conocimiento: {str(e)}")
+            return []
+
+    def clear_knowledge_documents(self) -> bool:
+        """Elimina todos los documentos de la base de conocimiento"""
+        if not self.is_connected() or self.knowledge_collection is None:
+            return False
+
+        try:
+            self.knowledge_collection.delete_many({})
+            logger.info("Colección de conocimiento limpiada correctamente")
+            return True
+        except Exception as e:
+            logger.error(f"Error al limpiar la base de conocimiento: {str(e)}")
+            return False
     
     def close(self):
         """Cierra la conexión a MongoDB"""

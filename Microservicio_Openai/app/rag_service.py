@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .config import settings
 from .document_processor import DocumentProcessor
+from .database import mongodb_service
 
 
 class RAGService:
@@ -90,6 +91,13 @@ Answer:"""
         """Carga y divide los documentos en chunks"""
         documents_content = []
         
+        # Prioridad 0: cargar documentos almacenados en MongoDB
+        mongo_documents = mongodb_service.get_all_knowledge_documents()
+        for entry in mongo_documents:
+            content = entry.get("content", "")
+            if content and content.strip():
+                documents_content.append(content)
+
         # Cargar desde directorio de documentos si existe
         if os.path.exists(settings.documents_directory) and os.path.isdir(settings.documents_directory):
             # Buscar archivos soportados en el directorio

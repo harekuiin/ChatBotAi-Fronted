@@ -158,11 +158,40 @@ Historial de conversación:
     
     def _setup_vector_store(self):
         """Configura el vector store desde /kb o documentos con metadatos de fuentes"""
+        documents_list = []  # Lista de objetos Document con metadatos
+
+        # Prioridad 0: Cargar documentos almacenados en MongoDB
+        mongo_documents = mongodb_service.get_all_knowledge_documents()
+        for entry in mongo_documents:
+            content = entry.get("content", "")
+            if not content or not content.strip():
+                continue
+
+            metadata = dict(entry.get("metadata", {}))
+            metadata.setdefault("document_id", entry.get("id"))
+            metadata.setdefault("directory", "mongo")
+
+            source_metadata = metadata.get("source") or metadata.get("source_path") or metadata.get("relative_path")
+            if not source_metadata:
+                source_metadata = entry.get("id")
+            metadata.setdefault("source", source_metadata)
+
+            filename = metadata.get("filename")
+            if not filename and isinstance(source_metadata, str):
+                filename = Path(source_metadata).name
+            if not filename:
+                filename = f"mongo_{entry.get('id')}.txt"
+            metadata["filename"] = filename
+
+            doc = Document(
+                page_content=content,
+                metadata=metadata
+            )
+            documents_list.append(doc)
+
         # Prioridad 1: Cargar desde /kb (base de conocimiento del hackathon)
         kb_directory = Path("./kb")
         documents_directory = Path(settings.documents_directory)
-        
-        documents_list = []  # Lista de objetos Document con metadatos
         
         # Cargar desde /kb si existe
         if kb_directory.exists() and kb_directory.is_dir():
@@ -475,40 +504,68 @@ INFORMACIÓN SOBRE SALUD PREVENTIVA Y BIENESTAR
                 context=context
             )
         else:
-            # Prompt básico sin guardrails (solo para desarrollo)
-            prompt = f"""Eres un coach de bienestar preventivo. Genera un plan personalizado de 2 semanas para el usuario.
+            # Prompt básico sin guardrails (solo para desarrollo) - usando mismo formato
+            prompt = """# --- PLANTILLA DEL COACH (LLM + RAG) ---
 
-IDIOMA OBLIGATORIO:
-- SIEMPRE responde ÚNICAMENTE en ESPAÑOL
-- El plan completo debe estar en español
-- No uses inglés ni otros idiomas
+Eres un coach virtual de bienestar preventivo. 
+
+Tu tarea es crear un plan de 2 semanas con acciones SMART 
+(específicas, medibles, alcanzables, relevantes y temporales)
+basadas en la información del usuario y en la mini-base de conocimiento local (/kb).
+
+Contexto:
+- El usuario ha recibido un puntaje de riesgo cardiometabólico (0–1) y un conjunto de variables que lo impulsan.
+- Debes ofrecer orientación clara y positiva enfocada en la prevención, no en el diagnóstico.
+
+Instrucciones:
+
+1. Usa solo información de la base de conocimiento /kb proporcionada (guías de salud).
+
+2. Cita las fuentes entre paréntesis al final de cada recomendación (por ejemplo: "según Guía de Sueño /kb/sueño.md").
+
+3. No inventes ni alucines fuentes. Si algo no está en la base, indica "no disponible en /kb".
+
+4. El plan debe tener entre 3 y 5 acciones concretas, agrupadas por tema (sueño, alimentación, actividad física, estrés, tabaco, etc.).
+
+5. Cada acción debe ser SMART y tener formato:
+
+   **Tema:** [nombre]  
+   **Acción:** [recomendación clara y alcanzable]  
+   **Duración:** 2 semanas  
+   **Medición:** cómo sabrá el usuario si cumple (por ejemplo: "anotar horas de sueño cada día").
+
+6. Mantén un tono empático y motivador.
+
+7. Usa lenguaje simple y no técnico.
+
+8. Incluye al final un bloque con este texto literal:
+
+   ---
+   ⚠️ *Este plan no constituye un diagnóstico médico.  
+   Si tu riesgo es alto o presentas síntomas, consulta a un profesional de salud.*
+   ---
+
+Formato de salida:
+- Devuelve el plan completo en texto, listo para exportar a PDF.
+- No incluyas código, JSON ni texto fuera del plan.
 
 PERFIL DEL USUARIO:
-{user_data_json}
+{user_data}
 
 PUNTUACIÓN DE RIESGO: {risk_score:.1%}
-FACTORES DE RIESGO PRINCIPALES: {', '.join(top_drivers)}
+FACTORES DE RIESGO PRINCIPALES: {top_drivers}
 
-CONOCIMIENTO DISPONIBLE (BASE DE CONOCIMIENTO):
+CONOCIMIENTO DISPONIBLE (BASE DE CONOCIMIENTO /kb):
 {context}
 
-REGLAS ESTRICTAS:
-- USA SOLO información del contexto proporcionado
-- CITA las fuentes usando [nombre_archivo] cuando uses información de ese documento
-- NO inventes información que no esté en el contexto
-- El plan debe ser específico, accionable y de 2 semanas
-- Enfócate en los factores de riesgo principales: {', '.join(top_drivers[:3])}
-- TODO el plan debe estar en ESPAÑOL
-
-Devuelve SOLO un JSON válido con este formato:
-{{
-  "plan": "Plan detallado de 2 semanas aquí... (TODO EN ESPAÑOL)",
-  "sources": ["archivo1.txt", "archivo2.txt"]
-}}
-
-JSON:"""
+Ahora genera el plan de coaching según las instrucciones anteriores:""".format(
+                user_data=user_data_json,
+                risk_score=risk_score,
+                top_drivers=', '.join(top_drivers),
+                context=context
+            )
         
-        # 4. Llamar a OpenAI con formato JSON
+        # 4. Llamar a OpenAI con formato de texto plano (no JSON)
         from openai import OpenAI
         client = OpenAI(api_key=settings.openai_api_key)
         
@@ -516,45 +573,26 @@ JSON:"""
             model=settings.openai_model,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
             temperature=0.7
         )
         
-        # 5. Extraer y validar respuesta JSON
-        response_text = response.choices[0].message.content.strip()
+        # 5. Extraer respuesta como texto plano (formato según especificaciones)
+        plan_text = response.choices[0].message.content.strip()
         
-        try:
-            plan_data = json.loads(response_text)
-            
-            # Validar estructura
-            if "plan" not in plan_data:
-                raise ValueError("La respuesta no contiene 'plan'")
-            if "sources" not in plan_data:
-                plan_data["sources"] = sources  # Usar fuentes recuperadas si no vienen en respuesta
-            
-            # Asegurar que sources es una lista
-            if isinstance(plan_data["sources"], str):
-                plan_data["sources"] = [plan_data["sources"]]
-            
-            # Combinar sources de RAG y de la respuesta
-            all_sources = list(set(sources + plan_data["sources"]))
-            
-            return {
-                "plan": plan_data["plan"],
-                "sources": all_sources
-            }
+        # Validar que la respuesta no esté vacía
+        if not plan_text:
+            logger.warning("La respuesta de OpenAI está vacía")
+            plan_text = f"Plan personalizado basado en tu perfil (riesgo: {risk_score:.1%}).\n\n" \
+                       f"Factores principales a abordar: {', '.join(top_drivers)}.\n\n" \
+                       f"⚠️ IMPORTANTE: Este sistema NO realiza diagnósticos médicos. " \
+                       f"Siempre consulta con un profesional de salud.\n\n" \
+                       f"Fuentes consultadas: {', '.join(sources)}"
         
-        except json.JSONDecodeError as e:
-            # Si falla el parsing, crear respuesta de fallback
-            logger.warning(f"Error parseando JSON de OpenAI: {str(e)}")
-            return {
-                "plan": f"Plan personalizado basado en tu perfil (riesgo: {risk_score:.1%}).\n\n"
-                       f"Factores principales a abordar: {', '.join(top_drivers)}.\n\n"
-                       f"⚠️ IMPORTANTE: Este sistema NO realiza diagnósticos médicos. "
-                       f"Siempre consulta con un profesional de salud.\n\n"
-                       f"Fuentes consultadas: {', '.join(sources)}",
-                "sources": sources
-            }
+        # Retornar plan en texto plano con las fuentes recuperadas por RAG
+        return {
+            "plan": plan_text,
+            "sources": sources
+        }
 
 
 # Instancia global del servicio

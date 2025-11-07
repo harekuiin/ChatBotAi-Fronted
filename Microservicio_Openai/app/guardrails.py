@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Guardrails éticos y médicos configurables para el sistema"""
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 from .config import settings
 
 
@@ -125,61 +125,68 @@ Historial de conversación:
 {{chat_history}}"""
     
     @classmethod
-    def get_coach_prompt(cls, user_data: Dict[str, Any], risk_score: float, top_drivers: List[str], context: str) -> str:
+    def get_coach_prompt(cls, user_data: Union[str, Dict[str, Any]], risk_score: float, top_drivers: List[str], context: str) -> str:
         """Retorna el prompt para generar plan de coaching con guardrails"""
         
-        high_threshold = cls.get_high_risk_threshold()
-        critical_threshold = cls.get_critical_risk_threshold()
-        
-        # Determinar nivel de riesgo
-        if risk_score >= critical_threshold:
-            risk_warning = "⚠️ RIESGO CRÍTICO - Se recomienda consulta médica URGENTE"
-        elif risk_score >= high_threshold:
-            risk_warning = "⚠️ RIESGO ALTO - Se recomienda consulta médica PRONTA"
-        else:
-            risk_warning = "Riesgo moderado - Consulta médica recomendada para seguimiento"
-        
-        return f"""Eres un coach de bienestar preventivo. Genera un plan personalizado de 2 semanas para el usuario.
+        return """# --- PLANTILLA DEL COACH (LLM + RAG) ---
 
-IDIOMA OBLIGATORIO:
-- SIEMPRE responde ÚNICAMENTE en ESPAÑOL
-- El plan completo debe estar en español
-- No uses inglés ni otros idiomas
-- Esta es una regla CRÍTICA: todo el plan debe ser en español
+Eres un coach virtual de bienestar preventivo. 
+
+Tu tarea es crear un plan de 2 semanas con acciones SMART 
+(específicas, medibles, alcanzables, relevantes y temporales)
+basadas en la información del usuario y en la mini-base de conocimiento local (/kb).
+
+Contexto:
+- El usuario ha recibido un puntaje de riesgo cardiometabólico (0–1) y un conjunto de variables que lo impulsan.
+- Debes ofrecer orientación clara y positiva enfocada en la prevención, no en el diagnóstico.
+
+Instrucciones:
+
+1. Usa solo información de la base de conocimiento /kb proporcionada (guías de salud).
+
+2. Cita las fuentes entre paréntesis al final de cada recomendación (por ejemplo: "según Guía de Sueño /kb/sueño.md").
+
+3. No inventes ni alucines fuentes. Si algo no está en la base, indica "no disponible en /kb".
+
+4. El plan debe tener entre 3 y 5 acciones concretas, agrupadas por tema (sueño, alimentación, actividad física, estrés, tabaco, etc.).
+
+5. Cada acción debe ser SMART y tener formato:
+
+   **Tema:** [nombre]  
+   **Acción:** [recomendación clara y alcanzable]  
+   **Duración:** 2 semanas  
+   **Medición:** cómo sabrá el usuario si cumple (por ejemplo: "anotar horas de sueño cada día").
+
+6. Mantén un tono empático y motivador.
+
+7. Usa lenguaje simple y no técnico.
+
+8. Incluye al final un bloque con este texto literal:
+
+   ---
+   ⚠️ *Este plan no constituye un diagnóstico médico.  
+   Si tu riesgo es alto o presentas síntomas, consulta a un profesional de salud.*
+   ---
+
+Formato de salida:
+- Devuelve el plan completo en texto, listo para exportar a PDF.
+- No incluyas código, JSON ni texto fuera del plan.
 
 PERFIL DEL USUARIO:
 {user_data}
 
 PUNTUACIÓN DE RIESGO: {risk_score:.1%}
-{risk_warning}
-FACTORES DE RIESGO PRINCIPALES: {', '.join(top_drivers)}
+FACTORES DE RIESGO PRINCIPALES: {top_drivers}
 
-CONOCIMIENTO DISPONIBLE (BASE DE CONOCIMIENTO):
+CONOCIMIENTO DISPONIBLE (BASE DE CONOCIMIENTO /kb):
 {context}
 
-REGLAS ESTRICTAS Y ÉTICAS:
-- USA SOLO información del contexto proporcionado
-- CITA las fuentes usando [nombre_archivo] cuando uses información de ese documento
-- NO inventes información que no esté en el contexto
-- NUNCA realices diagnósticos médicos
-- NUNCA prescribas medicamentos específicos
-- El plan debe ser de PREVENCIÓN y EDUCACIÓN únicamente
-- El plan debe ser específico, accionable y de 2 semanas
-- Enfócate en los factores de riesgo principales: {', '.join(top_drivers[:3])}
-- Si el riesgo es alto (≥{high_threshold:.0%}), incluye recomendación explícita de consultar médico
-- TODO el plan debe estar en ESPAÑOL
-
-{cls.MEDICAL_DISCLAIMER}
-
-IMPORTANTE: Incluye el disclaimer médico al final del plan. Todo debe estar en español.
-
-Devuelve SOLO un JSON válido con este formato:
-{{
-  "plan": "Plan detallado de 2 semanas aquí... (TODO EN ESPAÑOL, incluir disclaimer al final)",
-  "sources": ["archivo1.txt", "archivo2.txt"]
-}}
-
-JSON:"""
+Ahora genera el plan de coaching según las instrucciones anteriores:""".format(
+            user_data=user_data,
+            risk_score=risk_score,
+            top_drivers=', '.join(top_drivers),
+            context=context
+        )
     
     @classmethod
     def check_urgent_keywords(cls, text: str) -> bool:
