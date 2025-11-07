@@ -1,0 +1,31 @@
+# Dependencias del backend RAG
+
+# FastAPI y servidor
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-multipart>=0.0.6
+
+# LangChain y OpenAI
+langchain>=0.1.0
+langchain-openai>=0.0.2
+langchain-community>=0.0.10
+langchain-text-splitters>=0.0.1
+langchain-core>=0.1.28,<0.2.0
+
+# OpenAI
+openai>=1.6.1,<2.0.0
+
+# Vector Store
+chromadb==0.4.18
+
+# Base de datos
+pymongo>=4.6.0
+
+# Utilidades
+python-dotenv==1.0.0
+tiktoken==0.5.2
+requests==2.31.0  # Para tests
+
+
